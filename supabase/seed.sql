@@ -1,0 +1,2 @@
+-- Intentionally empty.
+-- Reference data is currently loaded in migrations.
