@@ -1,0 +1,19 @@
+{
+  "name": "yomika",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "mobile:start": "npm --workspace apps/mobile run start",
+    "mobile:ios": "npm --workspace apps/mobile run ios",
+    "mobile:android": "npm --workspace apps/mobile run android",
+    "mobile:web": "npm --workspace apps/mobile run web",
+    "mobile:typecheck": "npm --workspace apps/mobile exec -- tsc --noEmit",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:reset": "supabase db reset",
+    "planner:lint": "python3 \"$HOME/.codex/skills/development-planner-maintainer/scripts/planner.py\" lint development-planner.md"
+  }
+}
