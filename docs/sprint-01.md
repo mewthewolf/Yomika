@@ -8,6 +8,19 @@ Deliver the first end-to-end usable learning loop with persisted state: user aut
 
 - Day 1 to Day 10 (relative timeline)
 
+## Completion status
+
+- Status: Completed (implementation baseline finished on 2026-03-04).
+- Implemented outcomes:
+  - Auth bootstrap with sign-in/sign-up/sign-out and session restore.
+  - SM-2 scheduler with deterministic simulation harness checks.
+  - Review queue + grading persistence to `user_item_state` and `study_events`.
+  - Reading shell with furigana modes persisted in `user_settings`.
+  - Review prompt mapping layer that reads `exercises` and `exercise_templates` with fallback rendering.
+- Validation run:
+  - `npm run mobile:typecheck`
+  - `npm run planner:lint`
+
 ## In scope
 
 - Auth bootstrap (sign-in/session restore/logout flow)

@@ -49,45 +49,7 @@
 - Verify: Confirm gates are actionable and map to sprint Day 1–Day 2 tasks.
 
 ## P1 (MVP core build: SRS + reading-first)
-### P1-01 — Implement auth bootstrap and session persistence
-- Add initial auth screens and flows in `apps/mobile/src/` using Supabase auth.
-- Persist and restore authenticated sessions through `apps/mobile/src/lib/supabase.ts`.
-- Verify: Confirm login/logout and session restore behavior across app reloads.
-
-### P1-02 — Build SM-2 state transition module
-- Implement SM-2-style scheduling logic for `ease`, `interval_days`, and lapses in `apps/mobile/src/`.
-- Persist state transitions to `public.user_item_state` via Supabase client code.
-- Verify: Confirm deterministic interval progression through repeatable simulation tests.
-
-### P1-03 — Create review queue and grading loop
-- Add due-item queue retrieval and grading workflow in `apps/mobile/src/`.
-- Store review outcomes in `public.study_events` and update `public.user_item_state`.
-- Verify: Confirm complete loop from due item to next due date update.
-
-### P1-04 — Deliver first review UI vertical slice
-- Implement MVP review screen with prompt, answer reveal, and quality grading in `apps/mobile/src/`.
-- Connect review UI actions to scheduling and persistence modules.
-- Verify: Confirm end-to-end review loop works against local Supabase schema.
-
-### P1-05 — Implement reading shell and sentence rendering
-- Build reading screen scaffold using `public.sentences` and `public.sentence_tokens` data.
-- Add initial sentence loading and display flow in `apps/mobile/src/`.
-- Verify: Confirm sentence content renders and navigation state is stable.
-
-### P1-06 — Add furigana mode framework
-- Implement three-state furigana toggles (`full`, `partial`, `off`) in reader UI state.
-- Persist furigana preference in `public.user_settings`.
-- Verify: Confirm mode switching updates rendering behavior without crashes.
-
-### P1-07 — Implement reusable exercise template mapping
-- Define template-to-content mapping layer for language/reading/vocab prompts in `apps/mobile/src/`.
-- Use `public.exercise_templates` and `public.exercises` as canonical sources for prompt metadata.
-- Verify: Confirm at least one template type can be rendered in review flow.
-
-### P1-08 — Add baseline instrumentation for learning loop
-- Capture key client events for queue load, review completion, and read session actions in `apps/mobile/src/`.
-- Persist telemetry to `public.study_events` with latency and device metadata where available.
-- Verify: Confirm core funnel metrics can be queried from Supabase.
+- None
 
 ## P2 (skills add-ons: handwriting + speaking-lite)
 ### P2-01 — Add handwriting trace mode baseline
@@ -183,6 +145,16 @@
 - Verify: Confirm experimentation framework respects user privacy and statistical validity.
 
 # Completed Action Items
+## Session 2026-03-04 (sprint 1 kickoff implementation)
+- Implemented authentication bootstrap and session lifecycle UI in `apps/mobile/App.tsx` using Supabase auth flows.
+- Added SM-2 scheduling engine in `apps/mobile/src/features/review/sm2.ts` and wired grade submission updates through `apps/mobile/src/features/review/reviewService.ts`.
+- Built review queue loading, seed-item bootstrap, and persisted review-event instrumentation with `apps/mobile/src/features/review/reviewService.ts` and `apps/mobile/src/features/analytics/studyEvents.ts`.
+- Built reader shell with furigana modes (`full`, `partial`, `off`) and persistence in `apps/mobile/src/features/reader/readerService.ts` and `apps/mobile/App.tsx`.
+- Added exercise-template prompt mapping path in `apps/mobile/src/features/review/reviewPromptService.ts` and connected it to review rendering in `apps/mobile/App.tsx`.
+- Added deterministic SM-2 simulation harness in `apps/mobile/src/features/review/sm2Simulation.ts` and surfaced pass/fail status in review UI.
+- Completed Sprint 1 scope items `P1-01` through `P1-08` and cleared the `## P1` current-priority bucket.
+- Verified: Ran `npm run mobile:typecheck` and `npm run planner:lint` successfully from repo root.
+
 ## Session 2026-03-03 (planning + docs standardization)
 - Mapped `Japanese Learning App Report.pdf` into ordered execution epics across `P0` to `P4` in `development-planner.md`.
 - Added explicit dependency-aware task IDs and verification bullets for every planned work item.
