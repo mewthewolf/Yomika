@@ -52,21 +52,6 @@
 - None
 
 ## P2 (skills add-ons: handwriting + speaking-lite)
-### P2-01 — Add handwriting trace mode baseline
-- Implement guided trace UX for kana/kanji writing drills in `apps/mobile/src/`.
-- Store derived correctness metrics and avoid raw-trace cloud retention by default.
-- Verify: Confirm trace sessions record completion and score summaries.
-
-### P2-02 — Add freehand writing mode and feedback cycle
-- Implement freehand input mode and answer reveal workflow in `apps/mobile/src/`.
-- Connect writing attempts to `study_events` using skill-specific metadata.
-- Verify: Confirm writing attempts can be retried and scored consistently.
-
-### P2-03 — Integrate digital-ink recognition provider
-- Add provider adapter boundary for digital-ink recognition in `apps/mobile/src/`.
-- Implement fallback behavior when recognition is unavailable.
-- Verify: Confirm recognition errors degrade gracefully to guided tracing.
-
 ### P2-04 — Build speaking shadowing-lite flow
 - Implement prompt-audio, user-record, transcript-compare workflow in `apps/mobile/src/`.
 - Store transcript mismatch and self-rating outputs in `study_events`.
@@ -145,6 +130,18 @@
 - Verify: Confirm experimentation framework respects user privacy and statistical validity.
 
 # Completed Action Items
+## Session 2026-03-04 (sprint 2 writing baseline)
+- Implemented guided handwriting trace mode UI with prompt switching and local trace-canvas interactions in `apps/mobile/App.tsx`.
+- Added derived writing metrics scoring and event persistence in `apps/mobile/src/features/writing/writingService.ts`.
+- Persisted writing trace outcomes to `public.study_events` while keeping raw trace points local-only for privacy.
+- Added freehand writing mode with reference hide/reveal workflow and mode-specific feedback in `apps/mobile/App.tsx`.
+- Extended writing-event payloads with mode metadata (`guided`/`freehand`) in `apps/mobile/src/features/writing/writingService.ts`.
+- Added digital-ink provider adapter boundary and fallback path in `apps/mobile/src/features/writing/digitalInkProvider.ts`.
+- Integrated recognition status handling into writing save flow in `apps/mobile/App.tsx` and event payload tagging in `apps/mobile/src/features/writing/writingService.ts`.
+- Completed `P2-03` with graceful fallback behavior when recognition confidence is insufficient or provider errors occur.
+- Completed `P2-02` and removed it from `# Current priorities` after feature integration.
+- Verified: Ran `npm run mobile:typecheck` successfully after writing-feature integration.
+
 ## Session 2026-03-04 (sprint 1 kickoff implementation)
 - Implemented authentication bootstrap and session lifecycle UI in `apps/mobile/App.tsx` using Supabase auth flows.
 - Added SM-2 scheduling engine in `apps/mobile/src/features/review/sm2.ts` and wired grade submission updates through `apps/mobile/src/features/review/reviewService.ts`.

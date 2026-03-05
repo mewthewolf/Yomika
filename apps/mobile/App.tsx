@@ -2,6 +2,8 @@ import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  type GestureResponderEvent,
+  type LayoutChangeEvent,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -22,7 +24,10 @@ import {
   type FuriganaMode,
   type ReaderSentence,
 } from "./src/features/reader/readerService";
-import { loadReviewPromptForItem, type ReviewPrompt } from "./src/features/review/reviewPromptService";
+import {
+  loadReviewPromptForItem,
+  type ReviewPrompt,
+} from "./src/features/review/reviewPromptService";
 import {
   loadDueReviewItems,
   submitReviewGrade,
@@ -30,10 +35,28 @@ import {
 } from "./src/features/review/reviewService";
 import { runSm2Simulation } from "./src/features/review/sm2Simulation";
 import type { ReviewGrade } from "./src/features/review/sm2";
+import {
+  HeuristicDigitalInkProvider,
+  recognizeWithFallback,
+} from "./src/features/writing/digitalInkProvider";
+import {
+  WRITING_PROMPTS,
+  calculateTraceMetrics,
+  getTraceFeedback,
+  persistTraceMetrics,
+  type WritingMode,
+  type TraceMetrics,
+  type TracePoint,
+} from "./src/features/writing/writingService";
 import { supabase } from "./src/lib/supabase";
 
-type AppTab = "review" | "reader";
+type AppTab = "review" | "reader" | "writing";
 type AuthMode = "sign_in" | "sign_up";
+
+type CanvasSize = {
+  width: number;
+  height: number;
+};
 
 const GRADES: ReviewGrade[] = [0, 1, 2, 3, 4, 5];
 
@@ -68,11 +91,25 @@ export default function App() {
   const [furiganaMode, setFuriganaMode] = useState<FuriganaMode>("partial");
   const [furiganaSaving, setFuriganaSaving] = useState(false);
 
+  const [writingPromptIndex, setWritingPromptIndex] = useState(0);
+  const [writingMode, setWritingMode] = useState<WritingMode>("guided");
+  const [showReference, setShowReference] = useState(true);
+  const [tracePoints, setTracePoints] = useState<TracePoint[]>([]);
+  const [traceStartedAt, setTraceStartedAt] = useState<number | null>(null);
+  const [canvasSize, setCanvasSize] = useState<CanvasSize>({ width: 0, height: 0 });
+  const [writingSaving, setWritingSaving] = useState(false);
+  const [writingError, setWritingError] = useState<string | null>(null);
+  const [writingMessage, setWritingMessage] = useState<string | null>(null);
+  const [lastTraceMetrics, setLastTraceMetrics] = useState<TraceMetrics | null>(null);
+  const [lastRecognition, setLastRecognition] = useState<string | null>(null);
+
   const user = session?.user ?? null;
   const currentReviewItem = reviewQueue[0] ?? null;
   const activeSentence = readerSentences[activeSentenceIndex] ?? null;
+  const activeWritingPrompt = WRITING_PROMPTS[writingPromptIndex] ?? WRITING_PROMPTS[0];
 
   const sm2SelfCheck = useMemo(() => runSm2Simulation(), []);
+  const digitalInkProvider = useMemo(() => new HeuristicDigitalInkProvider(), []);
 
   const refreshReviewQueue = useCallback(async () => {
     if (!supabase || !user) {
@@ -320,6 +357,127 @@ export default function App() {
     [user],
   );
 
+  const onTraceStart = useCallback((event: GestureResponderEvent) => {
+    const { locationX, locationY } = event.nativeEvent;
+    const now = Date.now();
+
+    setTraceStartedAt(now);
+    setTracePoints([{ x: locationX, y: locationY, t: now }]);
+    setWritingError(null);
+    setWritingMessage(null);
+  }, []);
+
+  const onTraceMove = useCallback((event: GestureResponderEvent) => {
+    const { locationX, locationY } = event.nativeEvent;
+    const now = Date.now();
+
+    setTracePoints((previous) => {
+      if (previous.length >= 1200) {
+        return previous;
+      }
+
+      const last = previous[previous.length - 1];
+      if (last) {
+        const dx = locationX - last.x;
+        const dy = locationY - last.y;
+        if (dx * dx + dy * dy < 6.25) {
+          return previous;
+        }
+      }
+
+      return [...previous, { x: locationX, y: locationY, t: now }];
+    });
+  }, []);
+
+  const onCanvasLayout = useCallback((event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    setCanvasSize({ width, height });
+  }, []);
+
+  const clearTrace = useCallback(() => {
+    setTracePoints([]);
+    setTraceStartedAt(null);
+    setLastTraceMetrics(null);
+    setLastRecognition(null);
+    setWritingMessage(null);
+    setWritingError(null);
+  }, []);
+
+  const nextWritingPrompt = useCallback(() => {
+    setWritingPromptIndex((current) => (current + 1) % WRITING_PROMPTS.length);
+    clearTrace();
+    setShowReference(writingMode === "guided");
+  }, [clearTrace, writingMode]);
+
+  const toggleWritingMode = useCallback((mode: WritingMode) => {
+    setWritingMode(mode);
+    setShowReference(mode === "guided");
+    clearTrace();
+  }, [clearTrace]);
+
+  const toggleReference = useCallback(() => {
+    setShowReference((value) => !value);
+  }, [clearTrace]);
+
+  const saveTraceSession = useCallback(async () => {
+    if (!supabase || !user) {
+      return;
+    }
+
+    if (tracePoints.length < 4) {
+      setWritingError("Draw a longer trace before saving this writing session.");
+      return;
+    }
+
+    if (canvasSize.width <= 0 || canvasSize.height <= 0) {
+      setWritingError("Canvas is not ready yet. Try again in a moment.");
+      return;
+    }
+
+    const durationMs = traceStartedAt ? Math.max(1, Date.now() - traceStartedAt) : 1;
+    const metrics = calculateTraceMetrics(tracePoints, durationMs, canvasSize.width, canvasSize.height);
+
+    setWritingSaving(true);
+    setWritingError(null);
+
+    try {
+      const recognition = await recognizeWithFallback(digitalInkProvider, {
+        points: tracePoints,
+        canvasWidth: canvasSize.width,
+        canvasHeight: canvasSize.height,
+        promptGlyph: activeWritingPrompt.glyph,
+      });
+
+      const recognitionTag =
+        recognition.status === "recognized"
+          ? `${recognition.provider}_${recognition.confidence}`
+          : `fallback_${recognition.reason ?? "unknown"}`;
+
+      await persistTraceMetrics(
+        supabase,
+        user.id,
+        activeWritingPrompt,
+        metrics,
+        writingMode,
+        recognitionTag,
+      );
+
+      setLastTraceMetrics(metrics);
+      setLastRecognition(
+        recognition.status === "recognized"
+          ? `Digital ink recognized ${recognition.matchedGlyph ?? "glyph"} at ${recognition.confidence}% confidence.`
+          : `Digital ink fallback activated (${recognition.reason ?? "unknown reason"}).`,
+      );
+      const feedback = getTraceFeedback(metrics.traceScore);
+      setWritingMessage(`Saved ${writingMode} trace with score ${metrics.traceScore}. ${feedback}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save trace metrics.";
+      setWritingError(message);
+    } finally {
+      setWritingSaving(false);
+    }
+  }, [activeWritingPrompt, canvasSize.height, canvasSize.width, digitalInkProvider, tracePoints, traceStartedAt, user, writingMode]);
+
   const displayedSentence = useMemo(() => {
     if (!activeSentence) {
       return "";
@@ -344,7 +502,7 @@ export default function App() {
     return (
       <SafeAreaView style={styles.pageCenter}>
         <ActivityIndicator size="large" color="#2e4f7d" />
-        <Text style={styles.centerText}>Bootstrapping Sprint 1 baseline...</Text>
+        <Text style={styles.centerText}>Bootstrapping Sprint 2 baseline...</Text>
       </SafeAreaView>
     );
   }
@@ -362,8 +520,8 @@ export default function App() {
     return (
       <SafeAreaView style={styles.page}>
         <View style={styles.authCard}>
-          <Text style={styles.title}>Yomika Sprint 1</Text>
-          <Text style={styles.subtitle}>Auth bootstrap + SM-2 + reader baseline</Text>
+          <Text style={styles.title}>Yomika Sprint Workspace</Text>
+          <Text style={styles.subtitle}>Auth + review + reader + writing trace mode</Text>
 
           <View style={styles.modeRow}>
             <Pressable
@@ -420,7 +578,7 @@ export default function App() {
     <SafeAreaView style={styles.page}>
       <View style={styles.headerCard}>
         <View>
-          <Text style={styles.title}>Yomika Sprint 1 Workspace</Text>
+          <Text style={styles.title}>Yomika Sprint Workspace</Text>
           <Text style={styles.subtitle}>{session.user.email ?? "Authenticated user"}</Text>
         </View>
         <Pressable style={styles.secondaryButton} onPress={signOut}>
@@ -440,6 +598,12 @@ export default function App() {
           onPress={() => setActiveTab("reader")}
         >
           <Text style={styles.tabText}>Reader</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.tabButton, activeTab === "writing" && styles.tabButtonActive]}
+          onPress={() => setActiveTab("writing")}
+        >
+          <Text style={styles.tabText}>Writing</Text>
         </Pressable>
       </View>
 
@@ -468,9 +632,7 @@ export default function App() {
               {reviewPromptLoading ? <ActivityIndicator color="#2e4f7d" /> : null}
               {reviewPromptError ? <Text style={styles.errorText}>{reviewPromptError}</Text> : null}
 
-              <Text style={styles.itemPrompt}>
-                {reviewPrompt?.title ?? "Review Prompt"}
-              </Text>
+              <Text style={styles.itemPrompt}>{reviewPrompt?.title ?? "Review Prompt"}</Text>
               <Text style={styles.itemBody}>
                 {reviewPrompt?.prompt ?? "Load a prompt and evaluate your recall."}
               </Text>
@@ -500,7 +662,9 @@ export default function App() {
             <Text style={styles.infoText}>No due review items. Use refresh to re-check queue.</Text>
           )}
         </View>
-      ) : (
+      ) : null}
+
+      {activeTab === "reader" ? (
         <View style={styles.panel}>
           <View style={styles.panelHeaderRow}>
             <Text style={styles.panelTitle}>Reading Mode</Text>
@@ -549,7 +713,99 @@ export default function App() {
             <Text style={styles.infoText}>No sentence data available yet.</Text>
           )}
         </View>
-      )}
+      ) : null}
+
+      {activeTab === "writing" ? (
+        <View style={styles.panel}>
+          <View style={styles.panelHeaderRow}>
+            <Text style={styles.panelTitle}>Writing Trace Mode</Text>
+            <Pressable style={styles.secondaryButton} onPress={nextWritingPrompt}>
+              <Text style={styles.secondaryButtonText}>Next prompt</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.modeRow}>
+            {(["guided", "freehand"] as WritingMode[]).map((mode) => (
+              <Pressable
+                key={mode}
+                style={[styles.modeButton, writingMode === mode && styles.modeButtonActive]}
+                onPress={() => toggleWritingMode(mode)}
+              >
+                <Text style={styles.modeButtonText}>{mode}</Text>
+              </Pressable>
+            ))}
+          </View>
+
+          <View style={styles.glyphCard}>
+            {showReference ? (
+              <>
+                <Text style={styles.glyphText}>{activeWritingPrompt.glyph}</Text>
+                <Text style={styles.glyphMeta}>
+                  {activeWritingPrompt.reading} • {activeWritingPrompt.meaning}
+                </Text>
+              </>
+            ) : (
+              <Text style={styles.hiddenReference}>Reference hidden. Draw from memory, then reveal.</Text>
+            )}
+            <Text style={styles.glyphInstruction}>{activeWritingPrompt.instruction}</Text>
+          </View>
+
+          <View
+            style={styles.canvas}
+            onLayout={onCanvasLayout}
+            onStartShouldSetResponder={() => true}
+            onMoveShouldSetResponder={() => true}
+            onResponderGrant={onTraceStart}
+            onResponderMove={onTraceMove}
+            onResponderRelease={() => {
+              // no-op baseline; metrics are derived on explicit save.
+            }}
+          >
+            {tracePoints.map((point, index) => (
+              <View
+                key={`${point.t}-${index}`}
+                style={[styles.traceDot, { left: point.x - 2, top: point.y - 2 }]}
+              />
+            ))}
+          </View>
+
+          <View style={styles.actionsRow}>
+            <Pressable style={styles.secondaryButton} onPress={clearTrace}>
+              <Text style={styles.secondaryButtonText}>Clear</Text>
+            </Pressable>
+            <Pressable
+              style={styles.secondaryButton}
+              onPress={toggleReference}
+            >
+              <Text style={styles.secondaryButtonText}>
+                {showReference ? "Hide ref" : "Reveal ref"}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.primaryButton, writingSaving && styles.buttonDisabled]}
+              onPress={saveTraceSession}
+              disabled={writingSaving}
+            >
+              <Text style={styles.primaryButtonText}>{writingSaving ? "Saving..." : "Save session"}</Text>
+            </Pressable>
+          </View>
+
+          {writingError ? <Text style={styles.errorText}>{writingError}</Text> : null}
+          {writingMessage ? <Text style={styles.infoText}>{writingMessage}</Text> : null}
+
+          {lastTraceMetrics ? (
+            <>
+              <Text style={styles.itemStats}>
+                Score {lastTraceMetrics.traceScore} | Points {lastTraceMetrics.pointCount} | Duration {lastTraceMetrics.durationMs}ms | Coverage {lastTraceMetrics.coverageRatio}
+              </Text>
+              {lastRecognition ? <Text style={styles.hintText}>{lastRecognition}</Text> : null}
+            </>
+          ) : (
+            <Text style={styles.hintText}>Raw trace points stay local; only derived metrics are persisted.</Text>
+          )}
+        </View>
+      ) : null}
+
       <StatusBar style="dark" />
     </SafeAreaView>
   );
@@ -734,6 +990,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 10,
+    paddingHorizontal: 14,
   },
   primaryButtonText: {
     color: "#ffffff",
@@ -802,5 +1059,58 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 13,
     color: "#8d3440",
+  },
+  glyphCard: {
+    borderWidth: 1,
+    borderColor: "#c7d6e8",
+    borderRadius: 10,
+    backgroundColor: "#f8fbff",
+    padding: 10,
+    gap: 4,
+  },
+  glyphText: {
+    fontSize: 56,
+    color: "#183058",
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  glyphMeta: {
+    fontSize: 13,
+    color: "#35557f",
+    textAlign: "center",
+  },
+  glyphInstruction: {
+    fontSize: 12,
+    color: "#4f6788",
+    textAlign: "center",
+  },
+  hiddenReference: {
+    fontSize: 13,
+    color: "#3f5f86",
+    textAlign: "center",
+    paddingVertical: 12,
+  },
+  canvas: {
+    flex: 1,
+    minHeight: 220,
+    borderWidth: 1,
+    borderColor: "#b6c8df",
+    borderRadius: 12,
+    backgroundColor: "#ffffff",
+    position: "relative",
+    overflow: "hidden",
+  },
+  traceDot: {
+    position: "absolute",
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#2e69ad",
+  },
+  actionsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
   },
 });
